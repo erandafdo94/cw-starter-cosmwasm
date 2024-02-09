@@ -35,13 +35,33 @@ pub fn instantiate(
 
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn execute(
-    _deps: DepsMut,
-    _env: Env,
-    _info: MessageInfo,
-    _msg: ExecuteMsg,
+    deps: DepsMut,     // removed _ as needed later
+    env: Env,          // removed _ as needed later
+    info: MessageInfo, // removed _ as needed later
+    msg: ExecuteMsg,   // remove _ as used now
+) -> Result<Response, ContractError> {
+    match msg {
+        ExecuteMsg::CreatePoll {
+            poll_id,
+            question,
+            options,
+        } => execute_create_poll(deps, env, info, poll_id, question, options),
+        ExecuteMsg::Vote { poll_id, vote } => unimplemented!(),
+    }
+}
+
+// Previous code omitted
+fn execute_create_poll(
+    deps: DepsMut,
+    _env: Env, // _env as we won't be using it
+    info: MessageInfo,
+    poll_id: String,
+    question: String,
+    options: Vec<String>,
 ) -> Result<Response, ContractError> {
     unimplemented!()
 }
+// Following code omitted
 
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn query(_deps: Deps, _env: Env, _msg: QueryMsg) -> StdResult<Binary> {
