@@ -21,6 +21,11 @@ pub struct Ballot {
     pub option: String,
 }
 
+// A map with a String key and Poll value.
+// The key will be a UUID generated clientside
+//string here is the unique id of the poll
 pub const POLLS: Map<String, Poll> = Map::new("polls");
+//This composite key will be in the format of (Addr, String).
+//Where Addr is the address of the voter and String is the Poll UUID this vote is for.
 pub const BALLOTS: Map<(Addr, String), Ballot> = Map::new("ballots");
 pub const CONFIG: Item<Config> = Item::new("config");

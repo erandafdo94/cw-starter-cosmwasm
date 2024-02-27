@@ -3,7 +3,7 @@ use std::fs::create_dir_all;
 
 use cosmwasm_schema::{export_schema, remove_schemas, schema_for};
 
-use cw_starter::msg::{CustomResponse, ExecuteMsg, InstantiateMsg, QueryMsg};
+use cw_starter::msg::{ExecuteMsg, InstantiateMsg, QueryMsg};
 use cw_starter::state::{Ballot, Config, Poll};
 
 fn main() {
@@ -19,6 +19,4 @@ fn main() {
     export_schema(&schema_for!(Config), &out_dir);
     export_schema(&schema_for!(Poll), &out_dir);
     export_schema(&schema_for!(Ballot), &out_dir);
-    // Following code omitted
-    export_schema(&schema_for!(CustomResponse), &out_dir);
 }

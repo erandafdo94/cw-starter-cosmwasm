@@ -1,12 +1,18 @@
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
-use cosmwasm_std::{Binary, Deps, DepsMut, Env, MessageInfo, Response, StdResult};
+use cosmwasm_std::{
+    to_binary, Binary, Deps, DepsMut, Env, MessageInfo, Order, Response, StdResult,
+};
 use cw2::set_contract_version;
+
 // use cw2::set_contract_version;
 
 use crate::error::ContractError;
-use crate::msg::{ExecuteMsg, InstantiateMsg, QueryMsg};
-use crate::state::{Config, CONFIG};
+// Add our responses
+use crate::msg::{
+    AllPollsResponse, ExecuteMsg, InstantiateMsg, PollResponse, QueryMsg, VoteResponse,
+};
+use crate::state::{Ballot, Config, Poll, BALLOTS, CONFIG, POLLS};
 
 const CONTRACT_NAME: &str = "crates.io:cw-starter";
 const CONTRACT_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -46,32 +52,137 @@ pub fn execute(
             question,
             options,
         } => execute_create_poll(deps, env, info, poll_id, question, options),
-        ExecuteMsg::Vote { poll_id, vote } => unimplemented!(),
+        ExecuteMsg::Vote { poll_id, vote } => execute_vote(deps, env, info, poll_id, vote),
     }
 }
 
 // Previous code omitted
 fn execute_create_poll(
     deps: DepsMut,
-    _env: Env, // _env as we won't be using it
+    env: Env,
     info: MessageInfo,
     poll_id: String,
     question: String,
     options: Vec<String>,
 ) -> Result<Response, ContractError> {
-    unimplemented!()
+    if options.len() > 10 {
+        return Err(ContractError::TooManyOptions {});
+    }
+
+    let mut opts: Vec<(String, u64)> = vec![];
+    for option in options {
+        opts.push((option, 0));
+    }
+
+    let poll = Poll {
+        creator: info.sender,
+        question,
+        options: opts,
+    };
+
+    POLLS.save(deps.storage, poll_id, &poll)?;
+
+    Ok(Response::new())
+}
+
+// Note the removal of the _s as we use these variables later
+#[cfg_attr(not(feature = "library"), entry_point)]
+pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
+    match msg {
+        QueryMsg::AllPolls {} => query_all_polls(deps, env),
+        QueryMsg::Poll { poll_id } => query_poll(deps, env, poll_id),
+        QueryMsg::Vote { address, poll_id } => query_vote(deps, env, address, poll_id),
+    }
+}
+
+fn query_poll(deps: Deps, _env: Env, poll_id: String) -> StdResult<Binary> {
+    let poll = POLLS.may_load(deps.storage, poll_id)?;
+    to_binary(&PollResponse { poll })
+}
+
+fn query_vote(deps: Deps, _env: Env, address: String, poll_id: String) -> StdResult<Binary> {
+    let validated_address = deps.api.addr_validate(&address).unwrap();
+    let vote = BALLOTS.may_load(deps.storage, (validated_address, poll_id))?;
+
+    to_binary(&VoteResponse { vote })
+}
+
+// Previous code omitted
+fn query_all_polls(deps: Deps, _env: Env) -> StdResult<Binary> {
+    let polls = POLLS
+        .range(deps.storage, None, None, Order::Ascending)
+        .map(|p| Ok(p?.1))
+        .collect::<StdResult<Vec<_>>>()?;
+
+    to_binary(&AllPollsResponse { polls })
 }
 // Following code omitted
 
-#[cfg_attr(not(feature = "library"), entry_point)]
-pub fn query(_deps: Deps, _env: Env, _msg: QueryMsg) -> StdResult<Binary> {
-    unimplemented!()
+// Previous code omitted
+fn execute_vote(
+    deps: DepsMut,
+    _env: Env,
+    info: MessageInfo,
+    poll_id: String,
+    vote: String,
+) -> Result<Response, ContractError> {
+    let poll = POLLS.may_load(deps.storage, poll_id.clone())?;
+
+    match poll {
+        Some(mut poll) => {
+            // The poll exists
+            BALLOTS.update(
+                deps.storage,
+                (info.sender, poll_id.clone()),
+                |ballot: Option<Ballot>| -> StdResult<Ballot> {
+                    match ballot {
+                        Some(ballot) => {
+                            // We need to revoke their old vote
+                            // Find the position
+                            let position_of_old_vote = poll
+                                .options
+                                .iter()
+                                .position(|option| option.0 == ballot.option)
+                                .unwrap();
+                            // Decrement by 1
+                            poll.options[position_of_old_vote].1 -= 1;
+                            // Update the ballot
+                            Ok(Ballot {
+                                option: vote.clone(),
+                            })
+                        }
+                        None => {
+                            // Simply add the ballot
+                            Ok(Ballot {
+                                option: vote.clone(),
+                            })
+                        }
+                    }
+                },
+            )?;
+
+            // Find the position of the new vote option and increment it by 1
+            let position = poll.options.iter().position(|option| option.0 == vote);
+            if position.is_none() {
+                return Err(ContractError::Unauthorized {});
+            }
+            let position = position.unwrap();
+            poll.options[position].1 += 1;
+
+            // Save the update
+            POLLS.save(deps.storage, poll_id, &poll)?;
+            Ok(Response::new())
+        }
+        None => Err(ContractError::Unauthorized {}), // The poll does not exist so we just error
+    }
 }
+// Following code omitted
 
 #[cfg(test)]
 mod tests {
-    use crate::contract::instantiate; // the contract instantiate function
-    use crate::msg::InstantiateMsg;
+
+    use crate::contract::{execute, instantiate};
+    use crate::msg::{ExecuteMsg, InstantiateMsg};
     use cosmwasm_std::attr; // helper to construct an attribute e.g. ("action", "instantiate")
     use cosmwasm_std::testing::{mock_dependencies, mock_env, mock_info}; // mock functions to mock an environment, message info, dependencies // our instantate method
 
@@ -119,5 +230,130 @@ mod tests {
             res.attributes,
             vec![attr("action", "instantiate"), attr("admin", ADDR2),]
         );
+    }
+
+    #[test]
+    fn test_execute_create_poll_valid() {
+        let mut deps = mock_dependencies();
+        let env = mock_env();
+        let info = mock_info(ADDR1, &vec![]);
+        // Instantiate the contract
+        let msg = InstantiateMsg { admin: None };
+        let _res = instantiate(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
+
+        let msg = ExecuteMsg::CreatePoll {
+            poll_id: "some_id".to_string(),
+            question: "What's your favorite cosmos chain".to_string(),
+            options: vec![
+                "Sei".to_string(),
+                "Cosmos hub".to_string(),
+                "Injective".to_string(),
+            ],
+        };
+
+        let _res = execute(deps.as_mut(), env, info, msg).unwrap();
+    }
+
+    #[test]
+    fn test_execute_create_poll_invalid() {
+        let mut deps = mock_dependencies();
+        let env = mock_env();
+        let info = mock_info(ADDR1, &vec![]);
+        // Instantiate the contract
+        let msg: InstantiateMsg = InstantiateMsg { admin: None };
+        let _res = instantiate(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
+
+        let msg = ExecuteMsg::CreatePoll {
+            poll_id: "some_id".to_string(),
+            question: "What's your favorith number?".to_string(),
+            options: vec![
+                "1".to_string(),
+                "2".to_string(),
+                "3".to_string(),
+                "4".to_string(),
+                "5".to_string(),
+                "6".to_string(),
+                "7".to_string(),
+                "8".to_string(),
+                "9".to_string(),
+                "10".to_string(),
+                "11".to_string(),
+            ],
+        };
+        // Unwrap error to assert failure
+        let _err = execute(deps.as_mut(), env, info, msg).unwrap_err();
+    }
+
+    #[test]
+    fn test_execute_vote_valid() {
+        let mut deps = mock_dependencies();
+        let env = mock_env();
+        let info = mock_info(ADDR1, &vec![]);
+        // Instantiate the contract
+        let msg = InstantiateMsg { admin: None };
+        let _res = instantiate(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
+
+        // Create the poll
+        let msg = ExecuteMsg::CreatePoll {
+            poll_id: "some_id".to_string(),
+            question: "What's your favourite Cosmos coin?".to_string(),
+            options: vec![
+                "Cosmos Hub".to_string(),
+                "Juno".to_string(),
+                "Osmosis".to_string(),
+            ],
+        };
+        let _res = execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
+
+        // Create the vote, first time voting
+        let msg = ExecuteMsg::Vote {
+            poll_id: "some_id".to_string(),
+            vote: "Juno".to_string(),
+        };
+        let _res = execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
+
+        // Change the vote
+        let msg = ExecuteMsg::Vote {
+            poll_id: "some_id".to_string(),
+            vote: "Osmosis".to_string(),
+        };
+        let _res = execute(deps.as_mut(), env, info, msg).unwrap();
+    }
+
+    #[test]
+    fn test_execute_vote_invalid() {
+        let mut deps = mock_dependencies();
+        let env = mock_env();
+        let info = mock_info(ADDR1, &vec![]);
+        // Instantiate the contract
+        let msg = InstantiateMsg { admin: None };
+        let _res = instantiate(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
+
+        // Create the vote, some_id poll is not created yet.
+        let msg = ExecuteMsg::Vote {
+            poll_id: "some_id".to_string(),
+            vote: "Juno".to_string(),
+        };
+        // Unwrap to assert error
+        let _err = execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap_err();
+
+        // Create the poll
+        let msg = ExecuteMsg::CreatePoll {
+            poll_id: "some_id".to_string(),
+            question: "What's your favourite Cosmos coin?".to_string(),
+            options: vec![
+                "Cosmos Hub".to_string(),
+                "Juno".to_string(),
+                "Osmosis".to_string(),
+            ],
+        };
+        let _res = execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
+
+        // Vote on a now existing poll but the option "DVPN" does not exist
+        let msg = ExecuteMsg::Vote {
+            poll_id: "some_id".to_string(),
+            vote: "DVPN".to_string(),
+        };
+        let _err = execute(deps.as_mut(), env, info, msg).unwrap_err();
     }
 }

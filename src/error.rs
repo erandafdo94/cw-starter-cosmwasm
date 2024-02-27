@@ -8,4 +8,10 @@ pub enum ContractError {
 
     #[error("Custom Error val: {val:?}")]
     CustomError { val: String },
+
+    #[error("Too many poll options")]
+    TooManyOptions {},
+
+    #[error("No access")]
+    Unauthorized {},
 }
