@@ -59,7 +59,7 @@ pub fn execute(
 // Previous code omitted
 fn execute_create_poll(
     deps: DepsMut,
-    env: Env,
+    _env: Env,
     info: MessageInfo,
     poll_id: String,
     question: String,
@@ -181,14 +181,132 @@ fn execute_vote(
 #[cfg(test)]
 mod tests {
 
-    use crate::contract::{execute, instantiate};
-    use crate::msg::{ExecuteMsg, InstantiateMsg};
-    use cosmwasm_std::attr; // helper to construct an attribute e.g. ("action", "instantiate")
-    use cosmwasm_std::testing::{mock_dependencies, mock_env, mock_info}; // mock functions to mock an environment, message info, dependencies // our instantate method
+    use crate::contract::{execute, instantiate, query};
+    use crate::msg::{AllPollsResponse, ExecuteMsg, InstantiateMsg, QueryMsg, VoteResponse};
+    use cosmwasm_std::testing::{mock_dependencies, mock_env, mock_info};
+    use cosmwasm_std::{attr, from_binary}; // helper to construct an attribute e.g. ("action", "instantiate") // mock functions to mock an environment, message info, dependencies // our instantate method
 
     // Two fake addresses we will use to mock_info
     pub const ADDR1: &str = "addr1";
     pub const ADDR2: &str = "addr2";
+
+    #[test]
+    fn test_query_all_polls() {
+        let mut deps = mock_dependencies();
+        let env = mock_env();
+        let info = mock_info(ADDR1, &[]);
+        // Instantiate the contract
+        let msg = InstantiateMsg { admin: None };
+        let _res = instantiate(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
+
+        // Create a poll
+        let msg = ExecuteMsg::CreatePoll {
+            poll_id: "some_id_1".to_string(),
+            question: "What's your favourite Cosmos coin?".to_string(),
+            options: vec![
+                "Cosmos Hub".to_string(),
+                "Juno".to_string(),
+                "Osmosis".to_string(),
+            ],
+        };
+        let _res = execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
+
+        // Create a second poll
+        let msg = ExecuteMsg::CreatePoll {
+            poll_id: "some_id_2".to_string(),
+            question: "What's your colour?".to_string(),
+            options: vec!["Red".to_string(), "Green".to_string(), "Blue".to_string()],
+        };
+        let _res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
+
+        // Query
+        // Query
+        let msg = QueryMsg::AllPolls {};
+        let bin = crate::contract::query(deps.as_ref(), env, msg).unwrap();
+        let res: AllPollsResponse = from_binary(&bin).unwrap();
+        assert_eq!(res.polls.len(), 2);
+    }
+
+    // Previous code omitted
+    #[test]
+    fn test_query_poll() {
+        let mut deps = mock_dependencies();
+        let env = mock_env();
+        let info = mock_info(ADDR1, &[]);
+        // Instantiate the contract
+        let msg = InstantiateMsg { admin: None };
+        let _res = instantiate(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
+
+        // Create a poll
+        let msg = ExecuteMsg::CreatePoll {
+            poll_id: "some_id_1".to_string(),
+            question: "What's your favourite Cosmos coin?".to_string(),
+            options: vec![
+                "Cosmos Hub".to_string(),
+                "Juno".to_string(),
+                "Osmosis".to_string(),
+            ],
+        };
+        let _res = execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
+
+        // Create a vote
+        let msg = ExecuteMsg::Vote {
+            poll_id: "some_id_1".to_string(),
+            vote: "Juno".to_string(),
+        };
+        let _res = execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
+    }
+
+    // Previous code omitted
+    #[test]
+    fn test_query_vote() {
+        let mut deps = mock_dependencies();
+        let env = mock_env();
+        let info = mock_info(ADDR1, &[]);
+        // Instantiate the contract
+        let msg = InstantiateMsg { admin: None };
+        let _res = instantiate(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
+
+        // Create a poll
+        let msg = ExecuteMsg::CreatePoll {
+            poll_id: "some_id_1".to_string(),
+            question: "What's your favourite Cosmos coin?".to_string(),
+            options: vec![
+                "Cosmos Hub".to_string(),
+                "Juno".to_string(),
+                "Osmosis".to_string(),
+            ],
+        };
+        let _res = execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
+
+        // Create a vote
+        let msg = ExecuteMsg::Vote {
+            poll_id: "some_id_1".to_string(),
+            vote: "Juno".to_string(),
+        };
+        let _res = execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
+
+        // Query for a vote that exists
+        let msg = QueryMsg::Vote {
+            poll_id: "some_id_1".to_string(),
+            address: ADDR1.to_string(),
+        };
+        let bin = query(deps.as_ref(), env.clone(), msg).unwrap();
+        let res: VoteResponse = from_binary(&bin).unwrap();
+        // Expect the vote to exist
+        assert!(res.vote.is_some());
+
+        // Query for a vote that does not exists
+        let msg = QueryMsg::Vote {
+            poll_id: "some_id_2".to_string(),
+            address: ADDR2.to_string(),
+        };
+        let bin = query(deps.as_ref(), env, msg).unwrap();
+        let res: VoteResponse = from_binary(&bin).unwrap();
+        // Expect the vote to not exist
+        assert!(res.vote.is_none());
+    }
+    // Following code omitted
 
     #[test]
     fn test_instantiate() {
@@ -197,7 +315,7 @@ mod tests {
         // Mock the contract environment, contains the block info, contract address, etc.
         let env: cosmwasm_std::Env = mock_env();
         // Mock the message info, ADDR1 will be the sender, the empty vec means we sent no funds.
-        let info = mock_info(ADDR1, &vec![]);
+        let info = mock_info(ADDR1, &[]);
 
         // Create a message where we (the sender) will be an admin
         let msg = InstantiateMsg { admin: None };
@@ -216,7 +334,7 @@ mod tests {
         let mut deps = mock_dependencies();
         let env = mock_env();
         // Send as ADDR1 to show admin is different
-        let info = mock_info(ADDR1, &vec![]);
+        let info = mock_info(ADDR1, &[]);
 
         // Create a message where ADDR2 will be an admin
         // Have to use .to_string() method
@@ -236,7 +354,7 @@ mod tests {
     fn test_execute_create_poll_valid() {
         let mut deps = mock_dependencies();
         let env = mock_env();
-        let info = mock_info(ADDR1, &vec![]);
+        let info = mock_info(ADDR1, &[]);
         // Instantiate the contract
         let msg = InstantiateMsg { admin: None };
         let _res = instantiate(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
@@ -258,7 +376,7 @@ mod tests {
     fn test_execute_create_poll_invalid() {
         let mut deps = mock_dependencies();
         let env = mock_env();
-        let info = mock_info(ADDR1, &vec![]);
+        let info = mock_info(ADDR1, &[]);
         // Instantiate the contract
         let msg: InstantiateMsg = InstantiateMsg { admin: None };
         let _res = instantiate(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
@@ -288,7 +406,7 @@ mod tests {
     fn test_execute_vote_valid() {
         let mut deps = mock_dependencies();
         let env = mock_env();
-        let info = mock_info(ADDR1, &vec![]);
+        let info = mock_info(ADDR1, &[]);
         // Instantiate the contract
         let msg = InstantiateMsg { admin: None };
         let _res = instantiate(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
@@ -324,7 +442,7 @@ mod tests {
     fn test_execute_vote_invalid() {
         let mut deps = mock_dependencies();
         let env = mock_env();
-        let info = mock_info(ADDR1, &vec![]);
+        let info = mock_info(ADDR1, &[]);
         // Instantiate the contract
         let msg = InstantiateMsg { admin: None };
         let _res = instantiate(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
